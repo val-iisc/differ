@@ -1,17 +1,65 @@
 import os
+from os.path import join
 import sys
+
 import numpy as np
 from itertools import product
-from os.path import join
 import cv2
 import scipy.io as sio
+
 from shapenet_taxonomy import shapenet_category_to_id
+
 sys.path.append('src')
+
+
+def read_image(img_path, normalize=True):
+    '''
+    Read grayscale and color images from directory.
+
+    args:
+        img_path: str; path for input image to be read
+        normalize: Bool, (); True if image has to be normalized to 
+                                [0, 1] range
+    returns:
+        img_rgb: float; output image, in rgb format if color image
+    '''
+    img = cv2.imread(rgb_path)
+    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    img_rgb = np.astype(img_rgb)
+    if normalize:
+        img_rgb = img_rgb / 255.
+
+    return img_rgb
+
+
+def read_angles(angles_path, to_rad=True):
+    '''
+    Read values of pose angles from file, convert to radians.
+
+    args: 
+        angles_path: str; path for file from which angles are read
+        normalize: Bool, (); True if angles have to be converted to 
+                                radians
+    returns:
+        angle_x, angle_y: float, (); rotation angles wrt x and y axes
+    '''
+    with open(angles_path, 'r') as fp:
+        angles = [item.split('\n')[0] for item in fp.readlines()]
+    angle = angles[i % 10]
+    angle_x = float(angle.split(' ')[0])
+    angle_y = float(angle.split(' ')[1])
+    # Convert from degrees to radians
+    if to_rad:
+        angle_x = angle_x * np.pi/180.
+        angle_y = angle_y * np.pi/180.
+
+    return angle_x, angle_y
 
 
 def fetch_batch_drc(models, indices, batch_num, batch_size, args=None):
     '''
-    Obtain batch data for training
+    Obtain batch data for training.
+
     args:
         models: list of all ids/names of input image models
         indices: indices to be chosen from models for the current
@@ -32,31 +80,34 @@ def fetch_batch_drc(models, indices, batch_num, batch_size, args=None):
         batch_y: float, (); rotation angle along y-axis for the
                                 view point in radians
     '''
-    batch_ip = []
-    batch_gt = []
-    batch_names = []
-    batch_x = []
-    batch_y = []
-    batch_rgb = []
-    batch_partseg = []
+    batch_ip, batch_gt, batch_x, batch_y, batch_names = [[] for i in range(5)]
+    batch_data = [batch_gt, batch_x, batch_y]
+    if args.rgb:
+        batch_rgb = []
+        batch_data.append(batch_rgb)
+    if args.partseg:
+        batch_partseg = []
+        batch_data.append(batch_partseg)
 
-    for ind in indices[
-            batch_num*batch_size : batch_num*batch_size + batch_size
-            ]:
-        model_gt = []
-        model_x = []
-        model_y = []
-        model_rgb = []
-        model_partseg = []
+    for ind in indices[(batch_num*batch_size):
+                       (batch_num*batch_size + batch_size)]:
+        model_gt, model_x, model_y = [[] for i in range(3)]
+        model_data = [model_gt, model_x, model_y]
+        if args.rgb:
+            model_rgb = []
+            model_data.append(model_rgb)
+        if args.partseg:
+            model_partseg = []
+            model_data.append(model_partseg)
         model_path = models[ind[0]]
         model_name = model_path.split('/')[-1]
         img_path = join(model_path, 'render_%d.png' % ind[1])
 
-        ip_image = cv2.imread(img_path)
+        ip_image = read_image(img_path)
         ip_image = cv2.resize(ip_image, (args.IMG_W, args.IMG_H))
-        ip_image = cv2.cvtColor(ip_image, cv2.COLOR_BGR2RGB)
         batch_ip.append(ip_image)
         batch_names.append(model_name)
+
 
         for i in range(0, args.N_VIEWS):
             if args.CORR:
@@ -66,46 +117,29 @@ def fetch_batch_drc(models, indices, batch_num, batch_size, args=None):
             rgb_path = join(model_path, 'render_%d.png' % (i % 10))
             view_path = join(model_path, 'camera_%d.mat' % (i % 10))
             angles_path = join(model_path, 'view.txt')
+            ip_proj = read_image(proj_path, normalize=False)[:, :, 0]
+            # Read rotation angles in radians from file
+            angle_x, angle_y = read_angles(angles_path)
+            model_vals = [ip_proj, angle_x, angle_y]
+            if args.rgb:
+                # Read inputs and normalize to [0,1] range
+                ip_rgb = read_image(rgb_path, normalize=True)
+                model_vals.append(ip_rgb)
             if args.partseg:
                 labels_path = join(model_path, 'labels_%d.npy' % (
                     i % 10))
                 proj_labels = np.load(labels_path)
-                model_partseg.append(proj_labels)
+                model_vals.append(proj_labels)
+            
+            # Append the data from multiple views into the instance-wise list
+            _ = [model_item.append(vals_item) for model_item, vals_item in
+                 zip(model_data, model_vals)]
 
-            # Read inputs and normalize to [0,1] range
-            ip_rgb = cv2.imread(rgb_path)
-            ip_rgb = cv2.cvtColor(ip_rgb, cv2.COLOR_BGR2RGB)
-            ip_rgb = ip_rgb / 255.
-            ip_proj = cv2.imread(proj_path)[:, :, 0]
-
-            # Threshold depth images to obtain masks
-            ip_proj[ip_proj < 254] = 1
-            ip_proj[ip_proj >= 254] = 0
-            ip_proj = ip_proj.astype(np.float32)
-
-            model_rgb.append(ip_rgb)
-            model_gt.append(ip_proj)
-
-            with open(angles_path, 'r') as fp:
-                angles = [
-                    item.split('\n')[0] for item in fp.readlines()
-                    ]
-            angle = angles[i % 10]
-            angle_x = float(angle.split(' ')[0])
-            angle_y = float(angle.split(' ')[1])
-            # Convert angles to radians
-            model_x.append(angle_x * np.pi/180.)
-            model_y.append(angle_y * np.pi/180.)
-
-        batch_rgb.append(model_rgb)
-        batch_partseg.append(model_partseg)
-        batch_gt.append(model_gt)
-        batch_x.append(model_x)
-        batch_y.append(model_y)
-    batch_out = [
-        batch_ip, batch_rgb, batch_partseg, batch_gt,
-        batch_x, batch_y,
-        ]
+        # Append the instance-wise data into the batch list
+        _ = [batch_item.append(model_item) for batch_item, model_item in
+             zip(batch_data, model_data)]
+    batch_out = [batch_ip, batch_rgb, batch_partseg, batch_gt,
+                 batch_x, batch_y]
     batch_out = [np.array(item) for item in batch_out]
     batch_out.append(batch_names)
 
@@ -114,7 +148,8 @@ def fetch_batch_drc(models, indices, batch_num, batch_size, args=None):
 
 def fetch_labels(model_path):
     '''
-    Obtain part segmentation class labels for point cloud
+    Obtain part segmentation class labels for point cloud.
+
     args:
         model_path: str; directory of the pcl model
     returns:
@@ -129,7 +164,8 @@ def fetch_labels(model_path):
 
 def fetch_labels_rgb(model_path):
     '''
-    Obtain RGB color values for point cloud
+    Obtain RGB color values for point cloud.
+
     args:
         model_path: str; directory of the pcl model
     returns:
@@ -147,9 +183,8 @@ def fetch_batch_pcl_rgb(models, indices, batch_num, batch_size):
     batch_ip = []
     batch_gt = []
     batch_rgb = []
-    for ind in indices[
-            batch_num*batch_size : batch_num*batch_size+batch_size
-            ]:
+    for ind in indices[(batch_num*batch_size):
+                       (batch_num*batch_size + batch_size)]:
         model_path = models[ind[0]]
         pcl_path = join(model_path, 'pcl_1024_fps_trimesh.npy')
         pcl_gt = np.load(pcl_path)
@@ -182,9 +217,8 @@ def fetch_batch_seg(dataset, models, indices, batch_num, batch_size):
     batch_ip = []
     batch_gt = []
     batch_label_wts = []
-    for ind in indices[
-            batch_num*batch_size : batch_num*batch_size + batch_size
-            ]:
+    for ind in indices[(batch_num*batch_size):
+                       (batch_num*batch_size + batch_size)]:
         model_path = models[ind]
         pcl_inp = fetch_pcl(dataset, model_path)
         labels_gt = fetch_labels(model_path)
@@ -326,10 +360,8 @@ def get_feed_dict(models, indices, models_pcl, b, args):
     # Align axes according to the co-ordinate system of renderer
     batch_pcl_gt = preprocess_pcl_gt(batch_pcl_gt)
 
-    return (
-            batch_ip, batch_rgb, batch_gt_mask, batch_pcl_gt,
-            batch_x, batch_y, model_names
-            )
+    return (batch_ip, batch_rgb, batch_gt_mask, batch_pcl_gt,
+            batch_x, batch_y, model_names)
 
 
 def preprocess_pcl_gt(pcl):
