@@ -44,7 +44,7 @@ def read_angles(angles_path, angles=None, i=0, to_rad=True):
     returns:
         angle_x, angle_y: float, (); rotation angles wrt x and y axes
     '''
-    if angles == None:
+    if angles is None:
         with open(angles_path, 'r') as fp:
             angles = [item.split('\n')[0] for item in fp.readlines()]
         return angles
@@ -217,8 +217,19 @@ def fetch_batch_pcl(models, indices, batch_num, args):
     return batch_data
 
 
-def get_shapenet_drc_models(data_dir, categs=['03001627'],
-                            num_views=10):
+def get_drc_models_util(data_dir, categs, eval_set):
+    models = []
+    for categ_id in categs:
+        splits_file_path = join(
+            data_dir, 'splits', categ_id +
+            '_%s_list.npy' % eval_set)
+        models_list = np.load(splits_file_path)
+        models.extend([join(data_dir, categ_id, item) for item in models_list])
+    return models
+
+
+def get_shapenet_drc_models(data_dir, categs, NUM_VIEWS=10,
+                                    eval_set='train'):
     '''
     Obtain indices and names of all point cloud models, for train and
     validation sets.
@@ -231,74 +242,13 @@ def get_shapenet_drc_models(data_dir, categs=['03001627'],
         num_views: number of view points from which images are
                     rendered for each model
     returns:
-        train_pair_indices, val_pair_indices: list of tuples of
-                    model index and rendered image index
-        train_models, val_models: list of str; names of training
-                    and validation pcl models respectively
+        models: list of str; names of training
+                                and validation pcl models respectively
+        pair_indices: list of tuples of
+                        model index and rendered image index
     '''
-    train_models = []
-    val_models = []
-
-    for cat in categs:
-        cat_train_model = np.load(
-            data_dir+'/splits/%s_train_list.npy' % cat
-            )
-        cat_val_model = np.load(
-            data_dir + '/splits/%s_val_list.npy' % cat)
-        cat_train_model = [
-            join(data_dir, cat, item) for item in cat_train_model
-            ]
-        cat_val_model = [
-            join(data_dir, cat, item) for item in cat_val_model
-            ]
-        train_models.extend(cat_train_model)
-        val_models.extend(cat_val_model)
-
-    train_pair_indices = list(
-        product(xrange(len(train_models)), xrange(num_views))
-        )
-    val_pair_indices = list(
-        product(xrange(len(val_models)), xrange(num_views))
-        )
-
-    print 'TRAINING: models={}  samples={}'.format(
-        len(train_models), len(train_models)*num_views
-        )
-    print 'VALIDATION: models={}  samples={}'.format(
-        len(val_models), len(val_models)*num_views
-        )
-
-    return (train_models, val_models,
-            train_pair_indices, val_pair_indices)
-
-
-def get_drc_models_util(data_dir, category, eval_set):
-    models = []
-    if category == 'all':
-        cats = ['chair', 'car', 'aero']
-    else:
-        cats = [category]
-    for cat in cats:
-        categ_id = shapenet_category_to_id[cat]
-        splits_file_path = join(
-            data_dir, 'splits', categ_id +
-            '_%s_list.txt' % eval_set)
-        models_list = np.load(splits_file_path)
-        models.extend([join(data_dir, categ_id, item) for item in models_list])
-        with open(splits_file_path, 'r') as f:
-            for model in f.readlines():
-                models.append(
-                    join(data_dir, categ_id, model.strip()))
-
-    return models
-
-
-def get_shapenet_drc_models_partseg(data_dir, category, NUM_VIEWS,
-                                    eval_set):
-    models = get_drc_models_util(data_dir, category, eval_set)
-    pair_indices = list(
-        product(xrange(len(models)), xrange(NUM_VIEWS))
-        )
+    models = get_drc_models_util(data_dir, categs, eval_set)
+    pair_indices = list(product(xrange(len(models)), xrange(NUM_VIEWS)))
     print '{}: models={}  samples={}'.format(
         eval_set, len(models), len(models)*NUM_VIEWS)
 
