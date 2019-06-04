@@ -8,16 +8,12 @@ import os
 import sys
 
 from train_utils import *
-from utils_train import *
 
 sys.path.append('../src')
 
 # to hide scipy deprecation warnings while saving outputs
-
-
 def warn(*args, **kwargs):
     pass
-
 
 warnings.warn = warn
 
@@ -25,9 +21,10 @@ category_id = shapenet_category_to_id[args.category]
 
 
 def create_feed_dict(models, indices, models_pcl, b, args):
-    batch = get_feed_dict(models, indices, models_pcl, b, args)
-    (batch_ip, batch_gt_rgb, batch_gt_mask,
-     batch_pcl_gt, batch_x, batch_y, batch_names) = batch
+    batch_img, batch_pcl = get_feed_dict(models, indices, models_pcl, b, args)
+    (batch_ip, batch_gt_mask, batch_x,
+             batch_y, batch_gt_rgb, batch_names) = batch_img
+    batch_pcl_gt, batch_labels_rgb = batch_pcl
     feed_dict = {img_inp: batch_ip,  proj_gt_mask: batch_gt_mask,
                  proj_gt_rgb: batch_gt_rgb, pcl_gt: batch_pcl_gt,
                  view_x: batch_x, view_y: batch_y}
@@ -128,11 +125,14 @@ if __name__ == '__main__':
     with open(args_file, 'w') as f:
         json.dump(vars(args), f, ensure_ascii=False, indent=2, sort_keys=True)
 
-    (train_models, val_models,
-     train_pair_indices, val_pair_indices) = get_shapenet_drc_models(
-        data_dir, categs=[category_id])
-    train_models_pcl, val_models_pcl, _, _ = get_shapenet_drc_models(
-        data_dir_pcl, categs=[category_id])
+    train_models, train_pair_indices = get_shapenet_drc_models(
+        data_dir, categs=[category_id], eval_set='train')
+    val_models, val_pair_indices = get_shapenet_drc_models(
+        data_dir, categs=[category_id], eval_set='val')
+    train_models_pcl, _ = get_shapenet_drc_models(
+        data_dir_pcl, categs=[category_id], eval_set='train')
+    val_models_pcl, _ = get_shapenet_drc_models(
+        data_dir_pcl, categs=[category_id], eval_set='val')
     random.shuffle(val_pair_indices)
 
     batches = len(train_pair_indices) / args.batch_size
@@ -371,9 +371,9 @@ if __name__ == '__main__':
                     time_elapsed = time.time() - since
                     _pcl_out = sess.run(pcl_out, feed_dict)
 
-                    print ('Iter={}  Loss={: .5f}  RGB={: .5f}
-                           BCE={: .5f}  FWD={: .5f}  BWD={: .5f}
-                           Time={: .0f}m {: .0f}s').format(
+                    print 'Iter={}  Loss={: .5f}  RGB={: .5f}\
+                           BCE={: .5f}  FWD={: .5f}  BWD={: .5f}\
+                           Time={: .0f}m {: .0f}s'.format(
                                global_step, train_loss_N, L_rgb_N, L_bce_N,
                                L_fwd_N, L_bwd_N, time_elapsed//60,
                                time_elapsed % 60)
@@ -416,8 +416,8 @@ if __name__ == '__main__':
 
             time_elapsed = time.time() - since
             with open(log_file, 'a') as f:
-                epoch_str = ('{} {: .6f}  {: .6f}  {: .6f}  {: .6f}  {: .6f}
-                             {: .0f} {: .0f}').format(
+                epoch_str = '{} {: .6f}  {: .6f}  {: .6f}  {: .6f}  {: .6f}\
+                             {: .0f} {: .0f}'.format(
                                 i, train_epoch_loss, train_epoch_rgb,
                                 train_epoch_bce, train_epoch_fwd,
                                 train_epoch_bwd,
@@ -425,9 +425,9 @@ if __name__ == '__main__':
                 f.write(epoch_str+'\n')
 
             print '-'*65 + ' EPOCH ' + str(i) + ' ' + '-'*65
-            epoch_str = ('TRAIN Loss: {: .6f}  RGB: {: .6f}  BCE: {: .6f}
-                         FWD: {: .6f}  BWD: {: .6f}
-                         Time: {: .0f}m {: .0f}s').format(
+            epoch_str = 'TRAIN Loss: {: .6f}  RGB: {: .6f}  BCE: {: .6f}\
+                         FWD: {: .6f}  BWD: {: .6f}\
+                         Time: {: .0f}m {: .0f}s'.format(
                             train_epoch_loss, train_epoch_rgb,
                             train_epoch_bce, train_epoch_fwd, train_epoch_bwd,
                             time_elapsed // 60, time_elapsed % 60)
